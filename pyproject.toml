@@ -9,7 +9,7 @@ description = "Read Adobe .cube / HALD CLUT / 1D tone-curve LUTs and apply them 
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
-authors = [{ name = "Joe Petrucelli", email = "joepetjr@gmail.com" }]
+authors = [{ name = "Joe Petrucelli", email = "backroadcreativeco@gmail.com" }]
 keywords = ["lut", "cube", "hald", "clut", "color-grading", "numpy", "image-processing"]
 classifiers = [
     "Development Status :: 4 - Beta",
