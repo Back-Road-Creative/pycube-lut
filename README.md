@@ -40,8 +40,8 @@ One input shape reaches `apply_cube`, always.
 ## Install
 
 ```bash
-pip install pycube-lut            # .cube and 1D curves — NumPy only
-pip install "pycube-lut[hald]"    # adds Pillow, for reading HALD CLUT PNGs
+pip install git+https://github.com/Back-Road-Creative/pycube-lut                     # .cube and 1D curves — NumPy only
+pip install "pycube-lut[hald] @ git+https://github.com/Back-Road-Creative/pycube-lut" # adds Pillow, for reading HALD CLUT PNGs
 ```
 
 Python 3.11+.
@@ -157,8 +157,8 @@ image-analysis pass already produces.
   wrong, and nothing here will warn you.
 - **Whole image in memory.** The applier allocates several float32 arrays the size of
   the image. Tile very large images yourself.
-- **HALD CLUT reading needs Pillow** (`pip install "pycube-lut[hald]"`). Nothing else
-  does.
+- **HALD CLUT reading needs Pillow** (`pip install "pycube-lut[hald] @ git+https://github.com/Back-Road-Creative/pycube-lut"`).
+  Nothing else does.
 - **The selection heuristics are opinionated.** The weights in `pycube_lut.select` were
   tuned on landscape and travel photography. They are module constants — read them,
   and change them if your material is different.
