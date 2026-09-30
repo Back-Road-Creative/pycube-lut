@@ -68,6 +68,8 @@ byte-identical to the full-strength LUT.
 
 **uint16 in, uint16 out.** A look laid over a 16-bit master must not be the step that
 throws the master's headroom away, so the output dtype always matches the input.
+Any other dtype (float32 in `[0, 1]`, signed integers, `uint32`, bool) raises
+`CubeError` instead of being silently scaled as if it were 8-bit.
 
 ### Runnable end-to-end example
 
@@ -148,8 +150,8 @@ image-analysis pass already produces.
 - **Trilinear interpolation only.** Resolve, Photoshop and ffmpeg's `lut3d` default to
   *tetrahedral*, which differs slightly along the cube's diagonals. Expect small
   deviations from those tools on steep LUTs; use a denser LUT if it matters.
-- **8-bit and 16-bit integer images only.** Float images are not handled; normalise to
-  uint16 first.
+- **8-bit and 16-bit integer images only.** `apply_cube` raises `CubeError` for any
+  other dtype, float included; convert to uint8 or uint16 first.
 - **Read-only.** There is no LUT *writer*, no `.cube` generator, and no LUT inversion.
 - **1D tone curves are resampled to 33 points per axis.** The equivalent 3D table costs
   the cube of the 1D length, so a 1024-entry curve would mean ~10⁹ entries. Tone curves

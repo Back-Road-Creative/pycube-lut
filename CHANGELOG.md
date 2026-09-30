@@ -11,6 +11,9 @@ All notable changes to this project are documented here. The format follows
 - `load_cube()` and `Cube` now reject NaN, infinite and float32-overflowing values in the
   domain and table, and an inverted domain on a directly constructed `Cube`, with a
   `CubeError` instead of letting them reach the image cast as undefined values.
+- `apply_cube()` now raises `CubeError` for any dtype other than uint8 or uint16 (float32
+  `[0, 1]`, signed and wider integers, bool). Previously these were silently scaled as
+  8-bit, so a float image came back saturated or garbled.
 
 ## 0.1.0
 

@@ -243,9 +243,12 @@ def load_cube(path: str | Path) -> Cube:
 def apply_cube(rgb: np.ndarray, cube: Cube, strength: float = 1.0) -> np.ndarray:
     """Trilinearly interpolate an ``HxWx3`` image through ``cube``.
 
-    Accepts uint8 or uint16 input and returns the SAME dtype: a film emulation
-    laid over a 16-bit archival master must not be the step that throws the
-    master's headroom away. Pure NumPy, no ffmpeg. Deterministic.
+    Accepts uint8 or uint16 input and returns the SAME dtype; any other dtype
+    (float, signed or wider integer, bool) raises :class:`CubeError` rather than
+    being guessed at, because the normalisation peak (255 or 65535) is defined only
+    by those two. A film emulation laid over a 16-bit archival master must not be
+    the step that throws the master's headroom away. Pure NumPy, no ffmpeg.
+    Deterministic.
 
     ``strength`` is the LUT opacity in ``[0, 1]`` (clamped): the full-strength
     interpolated output is blended toward the ORIGINAL input in normalised
@@ -255,8 +258,16 @@ def apply_cube(rgb: np.ndarray, cube: Cube, strength: float = 1.0) -> np.ndarray
     """
     if rgb.ndim != 3 or rgb.shape[2] != 3:
         raise CubeError(f"expected an HxWx3 image, got shape {rgb.shape}")
+    if rgb.dtype == np.uint8:
+        peak = 255.0
+    elif rgb.dtype == np.uint16:
+        peak = 65535.0
+    else:
+        raise CubeError(
+            f"expected a uint8 or uint16 image, got dtype {rgb.dtype.name}; "
+            "convert to one of those first (float and signed images are not supported)"
+        )
     strength = min(1.0, max(0.0, float(strength)))
-    peak = 65535.0 if rgb.dtype == np.uint16 else 255.0
 
     norm = rgb.astype(np.float32) / peak
     span = cube.domain_max - cube.domain_min

@@ -408,3 +408,54 @@ def test_valid_fixtures_apply_without_runtime_warnings(tmp_path):
         out1 = apply_cube(img, load_cube(p1))
     assert out3[0, 0].tolist() == [64, 64, 64]
     assert abs(int(out1[0, 0, 2]) - 191) <= 2
+
+
+# --- LUT-2: only uint8 / uint16 pixels are accepted; nothing is silently 255-scaled ---
+
+
+def _identity_cube(tmp_path):
+    p = tmp_path / "id.cube"
+    _write_cube(p, 5, lambda r, g, b: (r, g, b))
+    return load_cube(p)
+
+
+@pytest.mark.parametrize(
+    "dtype",
+    [np.float32, np.float64, np.int8, np.int16, np.int32, np.int64, np.uint32, np.uint64, np.bool_],
+)
+def test_unsupported_pixel_dtype_is_rejected_not_scaled(tmp_path, dtype):
+    # A float32 [0, 1] image used to be divided by 255 and come back near-black (or,
+    # cast back to float, as 0..255 values); signed ints wrapped or clipped. Refuse.
+    cube = _identity_cube(tmp_path)
+    img = np.full((2, 2, 3), 1, dtype=dtype)
+    with pytest.raises(CubeError, match="uint8 or uint16") as exc:
+        apply_cube(img, cube)
+    assert np.dtype(dtype).name in str(exc.value)
+
+
+def test_float_unit_range_image_cannot_silently_use_255_scaling(tmp_path):
+    cube = _identity_cube(tmp_path)
+    img = np.linspace(0.0, 1.0, 2 * 2 * 3, dtype=np.float32).reshape(2, 2, 3)
+    with pytest.raises(CubeError, match="uint8 or uint16"):
+        apply_cube(img, cube)
+
+
+def test_uint16_precision_is_kept_beyond_8_bits(tmp_path):
+    # A LUT that halves every channel: 40000 -> 20000. Quantizing through 8 bits
+    # first would land on a multiple of ~128, so this pins real 16-bit precision.
+    p = tmp_path / "half.cube"
+    _write_cube(p, 2, lambda r, g, b: (r / 2, g / 2, b / 2))
+    cube = load_cube(p)
+    img = np.full((2, 2, 3), 40001, dtype=np.uint16)
+    out = apply_cube(img, cube)
+    assert out.dtype == np.uint16
+    assert np.abs(out.astype(int) - 20000).max() <= 1
+
+
+def test_uint8_known_output_is_unchanged(tmp_path):
+    p = tmp_path / "half.cube"
+    _write_cube(p, 2, lambda r, g, b: (r / 2, g / 2, b / 2))
+    cube = load_cube(p)
+    out = apply_cube(np.full((2, 2, 3), 200, dtype=np.uint8), cube)
+    assert out.dtype == np.uint8
+    assert np.abs(out.astype(int) - 100).max() <= 1
