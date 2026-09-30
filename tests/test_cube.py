@@ -1,5 +1,7 @@
 """Reader + trilinear applier: parsing, indexing order, domain, formats, strength."""
 
+import warnings
+
 import numpy as np
 import pytest
 
@@ -314,3 +316,95 @@ def test_out_of_range_strength_is_clamped(tmp_path):
     img = np.full((4, 4, 3), 200, dtype=np.uint8)
     assert np.array_equal(apply_cube(img, cube, 5.0), apply_cube(img, cube, 1.0))
     assert np.array_equal(apply_cube(img, cube, -2.0), apply_cube(img, cube, 0.0))
+
+
+# --- LUT-1: non-finite / unrepresentable values are rejected at the boundary ----------
+
+
+def _cube_text(header: str, rows: list[str]) -> str:
+    return header + "\n" + "\n".join(rows) + "\n"
+
+
+@pytest.mark.parametrize("bad", ["nan", "NaN", "inf", "-inf", "infinity", "1e999", "1e39"])
+def test_non_finite_table_entry_raises_before_apply(tmp_path, bad):
+    # 1e39 is finite as a Python float but overflows the float32 table to inf.
+    p = tmp_path / "badrow.cube"
+    rows = ["0 0 0"] * 7 + [f"{bad} 0.5 0.5"]
+    p.write_text(_cube_text("LUT_3D_SIZE 2", rows))
+    with pytest.raises(CubeError, match="finite") as exc:
+        load_cube(p)
+    assert str(p) in str(exc.value)
+
+
+@pytest.mark.parametrize("bad", ["nan", "inf", "-inf", "1e39"])
+@pytest.mark.parametrize("key", ["DOMAIN_MIN", "DOMAIN_MAX"])
+def test_non_finite_domain_raises(tmp_path, key, bad):
+    p = tmp_path / "baddom.cube"
+    vals = f"{bad} 0 0" if key == "DOMAIN_MIN" else f"1 {bad} 1"
+    p.write_text(_cube_text(f"LUT_3D_SIZE 2\n{key} {vals}", ["0 0 0"] * 8))
+    with pytest.raises(CubeError, match="finite") as exc:
+        load_cube(p)
+    assert str(p) in str(exc.value)
+
+
+@pytest.mark.parametrize("bad", ["nan", "inf", "1e39"])
+def test_non_finite_1d_entry_raises(tmp_path, bad):
+    p = tmp_path / "bad1d.cube"
+    p.write_text(_cube_text("LUT_1D_SIZE 4", ["0 0 0", f"0.3 {bad} 0.3", "0.6 0.6 0.6", "1 1 1"]))
+    with pytest.raises(CubeError, match="finite") as exc:
+        load_cube(p)
+    assert str(p) in str(exc.value)
+
+
+def test_directly_constructed_cube_rejects_non_finite_values():
+    table = np.zeros((2, 2, 2, 3), np.float32)
+    table[1, 1, 1, 2] = np.nan
+    with pytest.raises(CubeError, match="finite"):
+        Cube(2, table, np.zeros(3, np.float32), np.ones(3, np.float32))
+    with pytest.raises(CubeError, match="finite"):
+        Cube(
+            2,
+            np.zeros((2, 2, 2, 3), np.float32),
+            np.array([0, np.nan, 0], np.float32),
+            np.ones(3, np.float32),
+        )
+
+
+def test_directly_constructed_cube_rejects_inverted_domain():
+    with pytest.raises(CubeError, match="DOMAIN_MAX must exceed DOMAIN_MIN"):
+        Cube(
+            2,
+            np.zeros((2, 2, 2, 3), np.float32),
+            np.ones(3, np.float32),
+            np.zeros(3, np.float32),
+        )
+
+
+def test_finite_out_of_unit_range_table_values_are_kept(tmp_path):
+    # Legitimate LUTs overshoot [0, 1]; only non-finite values are rejected, and the
+    # applier clamps on output without a cast warning.
+    p = tmp_path / "overshoot.cube"
+    rows = ["-0.25 1.5 0.5"] * 8
+    p.write_text(_cube_text("LUT_3D_SIZE 2", rows))
+    cube = load_cube(p)
+    assert cube.table.min() == np.float32(-0.25) and cube.table.max() == np.float32(1.5)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        out = apply_cube(np.full((2, 2, 3), 100, np.uint8), cube)
+    assert out.tolist() == [[[0, 255, 128]] * 2] * 2
+
+
+def test_valid_fixtures_apply_without_runtime_warnings(tmp_path):
+    p3 = tmp_path / "swap.cube"
+    _write_cube(p3, 9, lambda r, g, b: (b, r, g))
+    p1 = tmp_path / "curve.cube"
+    p1.write_text(
+        _cube_text("LUT_1D_SIZE 4", [f"{v:.6f} {v:.6f} {1 - v:.6f}" for v in np.linspace(0, 1, 4)])
+    )
+    img = np.full((3, 3, 3), 64, np.uint8)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        out3 = apply_cube(img, load_cube(p3))
+        out1 = apply_cube(img, load_cube(p1))
+    assert out3[0, 0].tolist() == [64, 64, 64]
+    assert abs(int(out1[0, 0, 2]) - 191) <= 2

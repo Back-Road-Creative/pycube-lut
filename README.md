@@ -98,7 +98,9 @@ Cube specification requires, and it is the single most common way to get a LUT w
 ### Errors
 
 Every failure raises `CubeError` (a `ValueError` subclass) and always names the path.
-Failure is closed — a bad file never yields a silently truncated table.
+Failure is closed — a bad file never yields a silently truncated table, and a NaN,
+infinite or float32-overflowing domain or table value is rejected at load time rather
+than surfacing later as garbage pixels.
 
 ```python
 from pycube_lut import CubeError, load_cube

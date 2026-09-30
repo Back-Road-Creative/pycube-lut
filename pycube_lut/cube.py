@@ -49,6 +49,36 @@ class Cube:
     domain_min: np.ndarray  # (3,) float32
     domain_max: np.ndarray  # (3,) float32
 
+    def __post_init__(self) -> None:
+        """Fail closed on a cube the applier could only turn into garbage.
+
+        A NaN/infinite table or domain entry (or a float32 overflow) would
+        otherwise reach the final ``astype`` cast as an undefined-behaviour value.
+        """
+        _require_finite(self.table, "table")
+        _require_finite(self.domain_min, "DOMAIN_MIN")
+        _require_finite(self.domain_max, "DOMAIN_MAX")
+        if np.any(self.domain_max <= self.domain_min):
+            raise CubeError("DOMAIN_MAX must exceed DOMAIN_MIN on every channel")
+
+
+def _require_finite(values: np.ndarray, what: str, path: Path | None = None) -> None:
+    """Raise :class:`CubeError` unless every entry of ``values`` is finite.
+
+    ``values`` is already float32, so a literal like ``1e39`` -- finite as text,
+    infinite once stored -- is caught here too.
+    """
+    if not np.all(np.isfinite(values)):
+        where = f"{path}: " if path is not None else ""
+        raise CubeError(f"{where}{what} must be finite (no NaN or infinity, within float32 range)")
+
+
+def _to_float32(values) -> np.ndarray:
+    """``float32`` copy of ``values``; an out-of-range entry becomes ``inf`` silently,
+    for :func:`_require_finite` to report with the path attached."""
+    with np.errstate(over="ignore", invalid="ignore"):
+        return np.asarray(values, dtype=np.float32)
+
 
 def _table_from_rows(rows, size: int) -> np.ndarray:
     """Fold ``size**3`` R-fastest samples into a table indexed ``[r, g, b]``.
@@ -57,7 +87,7 @@ def _table_from_rows(rows, size: int) -> np.ndarray:
     order a HALD CLUT's pixels run in), so reshaping to ``(b, g, r, 3)`` and
     transposing gives the ``[r, g, b]`` table :func:`apply_cube` indexes.
     """
-    table = np.asarray(rows, dtype=np.float32).reshape(size, size, size, 3)
+    table = _to_float32(rows).reshape(size, size, size, 3)
     return np.ascontiguousarray(table.transpose(2, 1, 0, 3))
 
 
@@ -132,8 +162,9 @@ def load_cube(path: str | Path) -> Cube:
       separable 3D cube at :data:`LUT_1D_TO_3D_SIZE`.
 
     Raises :class:`CubeError` -- always naming the path -- on a missing/unreadable
-    file, a bad size directive, bad HALD geometry, or a data-row count that does
-    not match the declared size. Failure is always closed, never a silently
+    file, a bad size directive, bad HALD geometry, a data-row count that does
+    not match the declared size, or a NaN/infinite (or float32-overflowing)
+    domain or table value. Failure is always closed, never a silently
     truncated table.
     """
     path = Path(path)
@@ -175,7 +206,8 @@ def load_cube(path: str | Path) -> Cube:
             if len(vals) != 3:
                 raise CubeError(f"{path}: {key} needs 3 values, got {line!r}")
             target = domain_min if key == "DOMAIN_MIN" else domain_max
-            target[:] = vals
+            target[:] = _to_float32(vals)
+            _require_finite(target, key, path)
             continue
         if key in ("TITLE",):
             continue
@@ -195,7 +227,8 @@ def load_cube(path: str | Path) -> Cube:
     if size is None:  # a 1D tone-curve file: one row per entry, three curves wide
         if len(data) != size_1d:
             raise CubeError(f"{path}: expected {size_1d} data rows for a 1D LUT, found {len(data)}")
-        curves = np.asarray(data, dtype=np.float32)
+        curves = _to_float32(data)
+        _require_finite(curves, "1D table", path)
         return _separable_cube_from_curves(curves, (domain_min, domain_max))
 
     if len(data) != size**3:
@@ -203,6 +236,7 @@ def load_cube(path: str | Path) -> Cube:
             f"{path}: expected {size**3} data rows for a {size}^3 LUT, found {len(data)}"
         )
     table = _table_from_rows(data, size)
+    _require_finite(table, "table", path)
     return Cube(size=size, table=table, domain_min=domain_min, domain_max=domain_max)
 
 
